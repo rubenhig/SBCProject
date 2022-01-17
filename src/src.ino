@@ -1,15 +1,18 @@
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////LIBRERIAS Y DEFINICIONES THINGSBOARD///////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 #include <HTTPClient.h>
-// #define TOKEN "hZ0BzCWst0BsW8U3MCfL" //token
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////LIBRERIAS Y DEFINICIONES I2C//////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 #include <svm30.h> //LIBRERIA MODIFICADA POR ERROR DE LA TRAMA CRC I2C 
 #include <LiquidCrystal_I2C.h>
 #include <Wire.h>
+
 #define I2C_SDA 1
 #define I2C_SCL 3
 
@@ -20,7 +23,6 @@ LiquidCrystal_I2C lcd(0x27, I2C_SDA, I2C_SCL);
 TwoWire i2c(0);
 SVM30 svm;
 struct svm_values v;
-
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////LIBRERIAS Y DEFINICIONES RFID//////////////////////////////////////////////////////
@@ -37,9 +39,6 @@ struct svm_values v;
 #define RST_PIN   2 //Pin de reset
 
 MFRC522 mfrc522(HSPI_SS, RST_PIN); // Set up mfrc522 on the Arduino
-byte upmUIDs[7][4] = {{0x1B, 0x2C, 0x14, 0x1C}, {0xFF,0xFF,0xFF,0xFF},{0xFF,0xFF,0xFF,0xFF},{0xFF,0xFF,0xFF,0xFF},{0xFF,0xFF,0xFF,0xFF},{0xFF,0xFF,0xFF,0xFF},{0xFF,0xFF,0xFF,0xFF}}; //UID de tarjeta asignada a Ruben
-bool isDentro[7] = {false, false, false, false, false, false, false}; //inicializamos todos a false ya que no hay nadie dentro todavia
-
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////LIBRERIAS CAMARA////////////////////////////////////////////////////
@@ -87,7 +86,6 @@ bool isDentro[7] = {false, false, false, false, false, false, false}; //iniciali
 #define FACE_COLOR_CYAN   (FACE_COLOR_BLUE | FACE_COLOR_GREEN)
 #define FACE_COLOR_PURPLE (FACE_COLOR_BLUE | FACE_COLOR_RED
 
-
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////INICIALIZACION CAMARA///////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -114,18 +112,13 @@ httpd_handle_t camera_httpd = NULL;
 
 static int8_t detection_enabled = 1;     // 0 or 1
 static int8_t recognition_enabled = 1;   // 0 or 1
-const int tiempoEspera = 10000;
-int inicio = millis();
 
-const char* ssid = "TekiTeki";
-const char* password = "officeconnect123";
 boolean streamState = false;
 //Reconocimiento facial El número de imágenes registradas del mismo rostro
 #define ENROLL_CONFIRM_TIMES 5
 //Número de reconocimiento facial registrado
 #define FACE_ID_SAVE_NUMBER 7
 //Establecer el nombre de la persona que se muestra en el reconocimiento facial
-String recognize_face_matched_name[7] = {"Ruben","Alumno1","Alumno2","Alumno3","Alumno4","Alumno5","Alumno6"};    // 7 persons
 //Toma el ejemplo oficial get-Still Botón para conseguirCIF(400x296)Se puede reconocer la resolución para cargar las fotos de la cara en el espacio del sitio web de github u otros espacios del sitio web
 //Foto de rostro registrado 5 images * 7 person = 35 photos
 String imageDomain[5] = {"raw.githubusercontent.com", "raw.githubusercontent.com", "raw.githubusercontent.com", "raw.githubusercontent.com", "raw.githubusercontent.com"};
@@ -134,58 +127,82 @@ int image_width = 400;
 int image_height = 296;
 //CIF(400x296), QVGA(320x240), HQVGA(240x176), QQVGA(160x120)
 
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////DECLARACION DE FUNCIONES////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-
 void postTempCo2();
-void FaceMatched(int faceid);
-void FaceNoMatched();
 int checkAlumno(byte id[4], byte nuevoId[7][4]);
 void setLCDI2C();
 void co2sensorSetup();
 void scanI2C();
 void readCO2();
 void enrollImageRemote();
-void faceRecognition();
+int faceRecognition();
 static int run_face_recognition(dl_matrix3du_t *image_matrix, box_array_t *net_boxes);
 void setup_camera();
 void setup_wifi();
 static void draw_face_boxes(dl_matrix3du_t *image_matrix, box_array_t *boxes);
 static esp_err_t stream_handler(httpd_req_t *req);
 void startCameraServer();
-void leerRFID();
+int leerRFID();
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////SETUP///////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////DEFINICIONES IMPORTANTES///////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+const char* ssid = "SBCProject";
+const char* password = "control-aforo";
+byte upmUIDs[7][4] = {{0xEA,0x44,0x8D,0x16},{0x8E,0x90,0x1A,0xA5},{0xDE,0x13,0x11,0x88},{0x1B, 0x2C, 0x14, 0x1C},{0xFF,0xFF,0xFF,0xFF},{0xFF,0xFF,0xFF,0xFF},{0xFF,0xFF,0xFF,0xFF}}; //UID de tarjeta asignada a Ruben
+bool isDentro[7] = {false, false, false, false, false, false, false}; //inicializamos todos a false ya que no hay nadie dentro todavia
+String recognize_face_matched_name[7] = {"RUBEN HIG","RODRIGO","MARIO","RUBEN F","Alumno4","Alumno5","Alumno6"};    // 7 persons
+
+long inicio;
+long inicioLectura;
+int personasDentro;
+int idAlumnoActual;
+int noLeerSensores;
+const int tiempoEspera = 30000;
+const int tiempoEsperaLectura = 5000;
+bool leerAcceso;
+
 void setup() {
+  inicio = millis();
+  inicioLectura = millis();
+  personasDentro = 0;
+  leerAcceso = true;
 
   ////////////////////////////////////////////INICIO DE SERIAL//////////////////////////////////////////////////////////////
+  
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);  //Apague la energía cuando la energía sea inestable y reinicie la configuración   
   Serial.begin(115200);
   Serial.setDebugOutput(true);  
   Serial.println();
 
-//////////////////////////////////////////INICIO DE I2C///////////////////////////////////////////
+  //////////////////////////////////////////INICIO DE I2C///////////////////////////////////////////
   
   Wire.begin(I2C_SDA, I2C_SCL);
   i2c.begin(I2C_SDA, I2C_SCL);
   setLCDI2C();
   co2sensorSetup();
 
-  
   //////////////////////////////////////////INICIO DE CAMARA CON SUS DEPENDENCIAS///////////////////////////////////////////
+  
   lcd.setCursor(0,0);
   lcd.print("Conectando...");
   setup_wifi();
+  imprimir(WiFi.localIP().toString(),0);
+  delay(4000);
   setup_camera();
   startCameraServer();    //Inicie el servidor de video
+  
   //////////////////////////////////////////INICIO DE SPIFFS////////////////////////////////////////////////////////////////
-    if (!SPIFFS.begin(true)) {
+  
+  if (!SPIFFS.begin(true)) {
     Serial.println("SPIFFS mounted error");
     ESP.restart();
   } else {
@@ -194,59 +211,122 @@ void setup() {
   } 
 
   ////////////////////////////////////////////INICIO DE RFID////////////////////////////////////////////////////////////////
+  
   SPI.begin(HSPI_SCLK, HSPI_MISO, HSPI_MOSI); // open SPI connection
   mfrc522.PCD_Init(); // Initialize Proximity Coupling Device (PCD)
 
   ////////////////////////////////////////////DESCARGA DE IMGS Y ANALISIS DE CARAS////////////////////////////////////////// 
-  lcd.setCursor(0,0);
-  lcd.print("Descargando...");
+  
+  imprimir("Descargando...", 0);
   enrollImageRemote();  //Leer rostros registrados en archivos de imágenes remotos    
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("2 segs mas...");
+  imprimir("2 segs mas...", 0);
   delay(2000);
-  lcd.clear();          
+  lcd.clear();
+  postAforo(personasDentro); //inicializamos aforo a 0           
 }
-
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////LOOP////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+//INFORMACION IMPORTANTE:
+  //faceRecognition() y leerRFID():
+  //-2: Si no detectan nada  
+  //-1: si detectan pero no pertenece a alguien de la UPM
+  //0-6: devuelve a la persona reconocida.
+
 void loop() {
-  if(tiempoEspera + inicio > millis()) {
-    postTempCo2(); //leer y enviar datos thingsboard
+    
+  svm.GetValues(&v); //Leer los datos (temp y humedad) del sensor 
+  imprimirValores(v.temperature/1000.0, v.humidity/1000.0);//imprimir valores de temperatura y humedad
+  idAlumnoActual = faceRecognition();
+  
+  
+  if(idAlumnoActual == -1) { //Reconocido, pero no pertenece a la UPM
+    //enviar Mensaje de error
+    imprimir("NO IDENTIFICADO", 0);
+    leerAcceso = false;
+    delay(3000);
+  } else if(idAlumnoActual != -2){ //Reconocido
+    //Comprobar si esta dentro o fuera de la biblioteca
+    if(!isDentro[idAlumnoActual]) {
+      isDentro[idAlumnoActual] = true;
+      imprimir("PASE " + recognize_face_matched_name[idAlumnoActual], 0);//imprimir pase
+      personasDentro++; //sumar personas dentro
+      //actualizar thingsboard!!
+    } else {
+      imprimir("HASTA LUEGO " + recognize_face_matched_name[idAlumnoActual], 0);//imprimir hasta luego
+      isDentro[idAlumnoActual] = false;
+      personasDentro--; //restar personas dentro
+    }
+    postAforo(personasDentro); //Enviar contador a thingsboard
+    delay(3000);
+  }
+  
+  idAlumnoActual = leerRFID(); // Lee y analiza la tarjeta detectada, enviando un mensaje por pantalla
+
+  if(idAlumnoActual == -1) { //Reconocido, pero no pertenece a la UPM
+    //enviar Mensaje de error
+    imprimir("NO IDENTIFICADO", 0);
+    leerAcceso = false;
+    delay(3000);
+  } else if(idAlumnoActual != -2){ //Reconocido
+    //Comprobar si esta dentro o fuera de la biblioteca
+    if(!isDentro[idAlumnoActual]) {
+      imprimir("PASE " + recognize_face_matched_name[idAlumnoActual], 0);//imprimir pase
+      isDentro[idAlumnoActual] = true;
+      personasDentro++; //sumar personas dentro
+      //actualizar thingsboard!!
+    } else {
+      imprimir("HASTA LUEGO " + recognize_face_matched_name[idAlumnoActual], 0);//imprimir hasta luego
+      isDentro[idAlumnoActual] = false;
+      personasDentro--; //restar personas dentro
+    }
+    postAforo(personasDentro); //Enviar contador a thingsboard
+    delay(3000);
+  }
+     
+  if(tiempoEspera + inicio < millis()) {
+    postTempCo2(v); //leer y enviar datos thingsboard cada 10 segundos
     inicio = millis();
   }
-  readCO2(); //Lee los datos (3) del sensor y los imprime por pantalla
-  faceRecognition(); //esta funcion si detecta alguien de la UPM le deja pasar y actualiza la variable de personas dentro
-  leerRFID(); // Lee y analiza la tarjeta detectada, enviando un mensaje por pantalla    
 }
 
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////CUERPO///// DE FUNCIONES////////////////////////////////////////////////////////////////
+///////////////////////////////////////CUERPO DE FUNCIONES/////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void postTempCo2() {
+void imprimirValores(float temperatura, float humedad) {
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Temp:" + String(temperatura));
+  lcd.setCursor(0,1);
+  lcd.print("Hum:" + String(humedad));
+}
+
+void imprimir(String mensaje, int linea) {
+  lcd.clear();
+  lcd.setCursor(0,linea);
+  lcd.print(mensaje);
+}
+
+void postTempCo2(struct svm_values valores) {
     String AQIjson;
-    AQIjson = String("{\"id\": \"ambiente\"  , \"temp\": ") + String((float) v.temperature/1000) + String(", \"co2\": ") + String(v.CO2eq) + String("}");
+    AQIjson = String("{\"id\": \"ambiente\"  , \"temp\": ") + String((float) valores.temperature/1000) + String(", \"hum\": ") + String(valores.humidity) + String("}");
     Serial.println ("JSON: \n" + AQIjson);
 
     // Make a POST request with the data if WiFi is connected
     if ((WiFi.status() == WL_CONNECTED))
     {
     HTTPClient http;
-    http.begin("https://demo.thingsboard.io/api/v1/hZ0BzCWst0BsW8U3MCfL/telemetry");
+    http.begin("https://demo.thingsboard.io/api/v1/S3IMHzjV0PeI9RRpPTxC/telemetry");
     http.addHeader("Content-Type", "application/json");
-    int httpResponseCode = http.POST("{\"id\": \"AABBCCDDEEFF\", \"oaq\":30, \"no2\":73, \"o3\":73}");   //Send the actual POST request
+    int httpResponseCode = http.POST(AQIjson);   //Send the actual POST request
   
       if(httpResponseCode>0)
       {
         String response = http.getString();                       //Get the response to the request
-        Serial.println(httpResponseCode);   //Print return code
-        lcd.setCursor(0,1);
-        lcd.println(response);           //Print request answer
+        Serial.println(httpResponseCode);   //Print return codeQ
       }
       else
       {
@@ -259,44 +339,58 @@ void postTempCo2() {
     else
     {
       Serial.println ("Something wrong with WiFi?");
-    }
+    } 
+}
+
+void postAforo(int aforo) {
+  String AQIjson;
+    AQIjson = String("{\"id\": \"aforo\"  , \"afo\": ") + String(aforo) + String("}");
+    Serial.println ("JSON: \n" + AQIjson);
+
+    // Make a POST request with the data if WiFi is connected
+    if ((WiFi.status() == WL_CONNECTED))
+    {
+    HTTPClient http;
+    http.begin("https://demo.thingsboard.io/api/v1/S3IMHzjV0PeI9RRpPTxC/telemetry");
+    http.addHeader("Content-Type", "application/json");
+    int httpResponseCode = http.POST(AQIjson);   //Send the actual POST request
   
+      if(httpResponseCode>0)
+      {
+        String response = http.getString();                       //Get the response to the request
+        Serial.println(httpResponseCode);   //Print return code
+      }
+      else
+      {
+        Serial.print("Error on sending POST request: ");
+        Serial.println(httpResponseCode);
+      }
+      
+      http.end();  //Free resources
+    }
+    else
+    {
+      Serial.println ("Something wrong with WiFi?");
+    } 
 }
-
-
-
-
-void FaceMatched(int faceid) {  //Rostro registrado reconocido, POR LO TANTO DEJAMOS PASAR, NO TENEMOS QUE PASAR LA TARJETA
-  lcd.setCursor(0,1);
-  lcd.println("pase " + recognize_face_matched_name[faceid]);  
-  isDentro[faceid] = true; //Entra a la biblioteca 
-  delay(3000);
-  lcd.setCursor(0,1);
-  lcd.print("         ");
-}
-
-
-void FaceNoMatched() {  //Reconocer el rostro de un extraño
-  lcd.setCursor(0,1);
-  lcd.print("No pasar. RFID?");
-  delay(3000);
-  lcd.setCursor(0,1);
-  lcd.print("         ");
-}
-
 
 //Comprobar si la tarjeta RFID pertenece o no a la base de datos UPM
 int checkAlumno(byte id[4], byte nuevoId[7][4]) {
   int contador = 0;
   for(int i = 0; i < 7; i++) { //para cada UID
-    if(contador == 4) return i-1; //el UID ha coincidido asi que devolvemos true
+    if(contador == 4) return i-1; //el UID ha coincidido asi que devolvemos el id de la persona (i-1)
     else contador = 0;
     for(int j = 0; j < 4; j++) { //comprobar si los bytes se corresponden
-      if(id[j] != nuevoId[i][j]) return -1;
-      contador++; //el byte coincide
+      if(id[j] != nuevoId[i][j]) {
+        break; //saltamos a la siguiente tarjeta
+      } else {
+        contador++; //el byte coincide
+      }
     }
   }
+  return -1;
 }
+
 void setLCDI2C() { 
   // Inicializar el LCD
   lcd.init();
@@ -304,10 +398,12 @@ void setLCDI2C() {
   //Encender la luz de fondo.
   lcd.backlight();
 }
+
 void co2sensorSetup() {
   svm.EnableDebugging(false);
   svm.begin(&i2c);
 }
+
 void scanI2C() {
   byte error, address;
   int nDevices;
@@ -352,14 +448,8 @@ void scanI2C() {
   delay(5000);           // wait 5 seconds for next scan
 }
 
-void readCO2() {
-  //struct svm_values v;
-  lcd.setCursor(0,0);
-  if(!svm.GetValues(&v)) lcd.print("error");
-  lcd.print("T:");
-  lcd.print(String((float) v.temperature/1000));
-  lcd.print("CO2:");
-  lcd.print(String(v.CO2eq));
+void readCO2(struct svm_values *valores) { 
+  if(!svm.GetValues(valores)) Serial.print("error");
 }
 
 void enrollImageRemote() {  //Obtener el rostro de registro de fotos remoto
@@ -532,7 +622,9 @@ void enrollImageRemote() {  //Obtener el rostro de registro de fotos remoto
     }
   }
 }
-void faceRecognition() {
+
+int faceRecognition() {
+  int id = -2;
   camera_fb_t * fb = NULL;
   fb = esp_camera_fb_get();
   if (!fb) {
@@ -546,7 +638,7 @@ void faceRecognition() {
   if (!image_matrix) {
       esp_camera_fb_return(fb);
       Serial.println("dl_matrix3du_alloc failed");
-      return;
+      return id;
   }
   out_buf = image_matrix->item;
   out_len = fb->width * fb->height * 3;
@@ -557,11 +649,11 @@ void faceRecognition() {
   if(!s){
       dl_matrix3du_free(image_matrix);
       Serial.println("to rgb888 failed");
-      return;
+      return id;
   }
   box_array_t *net_boxes = face_detect(image_matrix, &mtmn_config);  //Realizar detección de rostros
   if (net_boxes){
-      run_face_recognition(image_matrix, net_boxes);  //Realizar reconocimiento facial
+      id = run_face_recognition(image_matrix, net_boxes);  //Realizar reconocimiento facial
       dl_lib_free(net_boxes->score);
       dl_lib_free(net_boxes->box);
       dl_lib_free(net_boxes->landmark);
@@ -569,8 +661,8 @@ void faceRecognition() {
       net_boxes = NULL;
   }
   dl_matrix3du_free(image_matrix);
+  return id;
 }
-
 
 //Función de reconocimiento facial
 static int run_face_recognition(dl_matrix3du_t *image_matrix, box_array_t *net_boxes){  
@@ -597,30 +689,16 @@ static int run_face_recognition(dl_matrix3du_t *image_matrix, box_array_t *net_b
               Serial.println("Nombre: No disponible");
             }  
             Serial.println();
-            FaceMatched(matched_id);  //Reconocer la cara registrada para ejecutar el control de comando
         } else {  //Si se reconoce como una cara no registrada
-            Serial.println("\nNo hay coincidencias");
-            if(cont < 5) {
-              cont++;
-              //Serial.printf("Intentos restantes antes de introducir tarjeta: %d", 5 - cont); 
-              Serial.println("Intentos restantes antes de introducir tarjeta: " + 5 - cont);       
-            } else {
-              Serial.println();
-              matched_id = -1;
-              FaceNoMatched();  //Reconocer como una cara extraña y ejecutar el control de comando
-              cont = 0;
-            }
-            
+            Serial.println("\nNo hay coincidencias");           
         }
     } else {  //Si se detecta un rostro humano, pero no se puede reconocer
         Serial.println("Face Not Aligned");
         Serial.println();
     }
-
     dl_matrix3du_free(aligned_face);
     return matched_id;
 }
-
 
 void setup_camera() {
   //Ajustes de configuración de video  https://github.com/espressif/esp32-camera/blob/master/driver/include/esp_camera.h
@@ -709,26 +787,15 @@ void setup_wifi() {
         delay(500);
         if ((StartTime+5000) < millis()) break;   
     } 
-  
-    if (WiFi.status() == WL_CONNECTED) {    
-        
+    if (WiFi.status() == WL_CONNECTED) {      
       Serial.println("");
       Serial.println("Direccion IP: ");
       Serial.println(WiFi.localIP());
       delay(2000);
       Serial.println("");
-  /*
-      for (int i=0;i<5;i++) {   //WIFI
-        ledcWrite(4,10);
-        delay(200);
-        ledcWrite(4,0);
-        delay(200);    
-      }
-      */
       break;
     }
   }
-
   if (WiFi.status() != WL_CONNECTED) { 
     ESP.restart();
   }
@@ -744,15 +811,7 @@ static void draw_face_boxes(dl_matrix3du_t *image_matrix, box_array_t *boxes){
     fb.data = image_matrix->item;
     fb.bytes_per_pixel = 3;
     fb.format = FB_BGR888;
-    /***********************************************************************************
-    void     fb_gfx_fillRect     (camera_fb_t *fb, int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color);
-    void     fb_gfx_drawFastHLine(camera_fb_t *fb, int32_t x, int32_t y, int32_t w, uint32_t color);
-    void     fb_gfx_drawFastVLine(camera_fb_t *fb, int32_t x, int32_t y, int32_t h, uint32_t color);
-    uint8_t  fb_gfx_putc         (camera_fb_t *fb, int32_t x, int32_t y, uint32_t color, unsigned char c);
-    uint32_t fb_gfx_print        (camera_fb_t *fb, int32_t x, int32_t y, uint32_t color, const char * str);
-    uint32_t fb_gfx_printf       (camera_fb_t *fb, int32_t x, int32_t y, uint32_t color, const char *format, ...);
-     ************************************************************************************/
-    
+        
     for (i = 0; i < boxes->len; i++){
         // rectangle box
         x = (int)boxes->box[i].box_p[0];
@@ -843,8 +902,7 @@ void startCameraServer(){
     //https://github.com/espressif/esp-idf/blob/master/components/esp_http_server/include/esp_http_server.h
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();  //El puerto del servidor se puede configurar en HTTPD_DEFAULT_CONFIG ()
     //Ruta de URL pe rsonalizable correspondiente a la función ejecutada
-
-
+    
    httpd_uri_t stream_uri = {
         .uri       = "/stream",       //http://192.168.xxx.xxx:81/stream
         .method    = HTTP_GET,
@@ -862,33 +920,23 @@ void startCameraServer(){
     }
 }
 
-void leerRFID() {
+int leerRFID() {
+  int id = -2;
   if (mfrc522.PICC_IsNewCardPresent()) { //Si vemos una tarjeta nueva:
       if(mfrc522.PICC_ReadCardSerial()) { //Si hemos leido bien el UID (tag) de la tarjeta
-        switch(checkAlumno(mfrc522.uid.uidByte, upmUIDs)) { //Si esta en la base de datos UPM, hay que guardar su cara y dejarle pasar
-          case -1: 
-            lcd.setCursor(0,1);
-            lcd.print("No pasar");
-            delay(3000);
-            lcd.setCursor(0,1);
-            lcd.print("         ");
-            break;
-          case 0: 
-            lcd.setCursor(0,1);
-            lcd.print("Pase");
-            delay(3000);
-            lcd.setCursor(0,1);
-            lcd.print("         ");
-            break;
-          default: 
-            lcd.setCursor(0,1);
-            lcd.print("Pase");
-            delay(3000);
-            lcd.setCursor(0,1);
-            lcd.print("         ");
-            break;
-        }
-        delay(2000);
+        lcd.clear();
+        lcd.setCursor(0,0);
+        /*
+        lcd.print(String(mfrc522.uid.uidByte[0]));
+        lcd.print(String(mfrc522.uid.uidByte[1]));
+        lcd.print(String(mfrc522.uid.uidByte[2]));
+        lcd.print(String(mfrc522.uid.uidByte[3]));
+        
+        delay(10000);
+        */  
+        return checkAlumno(mfrc522.uid.uidByte, upmUIDs);  //Devolver el id del alumno (si no, devolvemos -1, que significa que el alumno no es de la upm)
       }
+      return id;
   }
+  return id;
 }
